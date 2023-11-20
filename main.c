@@ -7,6 +7,7 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <dirent.h>
+#include <sys/wait.h>
  
 typedef struct {
     char signature[2];
@@ -36,10 +37,26 @@ typedef struct {
 } Pixel;
 
 
-void processFile(const char *filename, struct stat *file_info) {
-    char statistic_info[256];
-    int fd_output;
- 
+void processFile(const char *filename, struct stat *file_info, const char *output_dir) {
+
+  char stat_output_path[256];
+  snprintf(stat_output_path, sizeof(stat_output_path), "%s/%s_statistica.txt", output_dir, filename);
+
+  pid_t child_pid = fork();
+
+  if(child_pid == -1){
+    perror("EROARE la fork");
+    exit(EXIT_FAILURE);
+  }
+
+  if(child_pid == 0){
+    int fd_output = open(stat_output_path, O_WRONLY | O_CREAT| O_TRUNC, S_IRUSR | S_IWUSR);
+    if(fd_output == -1){
+      perror("EROARE la deschidere fisier output");
+      exit(EXIT_FAILURE);
+    }
+    
+    char statistic_info[4096];
     char *file_type = "fisier obisnuit";
  
     if (S_ISLNK(file_info->st_mode)) {
@@ -95,7 +112,7 @@ void processFile(const char *filename, struct stat *file_info) {
  
   sprintf(statistic_info, (file_info->st_mode & S_IXOTH) ? "X\n" : "-\n");
   write(fd_output, statistic_info, strlen(statistic_info));
- 
+	    
         } else {
             perror("readlink");
             exit(EXIT_FAILURE);
@@ -125,11 +142,9 @@ void processFile(const char *filename, struct stat *file_info) {
                     perror("Eroare la primirea informatiilor");
                     exit(EXIT_FAILURE);
                 }
- 
-                processFile(path, &entry_info);
- 
- 
-            }
+	    
+                processFile(entry->d_name, &entry_info, output_dir);
+	    }
         }
  
         closedir(dir);
@@ -165,19 +180,9 @@ void processFile(const char *filename, struct stat *file_info) {
                                     "tipul fisierului: %s\ncontorul de legaturi: %d\n",
                     filename, info_header.height, info_header.width, (long long)file_info->st_size, file_info->st_uid, ctime(&(file_info->st_mtime)), file_type,
                     (int)file_info->st_nlink);//fisier cu .bmp
-        }
+        
 
-pid_t grayProcess = fork();
-            if (grayProcess == -1) {
-                perror("EROARE la fork pentru conversia in tonuri de gri");
-                exit(EXIT_FAILURE);
-            }
-
-            if (grayProcess == 0) {
-                convertToGray(filename, "output_gray.bmp");
-                exit(EXIT_SUCCESS);
-            }
-	    
+	}
 	else {
             sprintf(statistic_info, "nume fisier: %s\ndimensiune: %lld\nidentificatorul utilizatorului: %d\ntimpul ultimei modificari: %s\n"
                                     "tipul fisierului: %s\ncontorul de legaturi: %d\n",
@@ -242,13 +247,21 @@ pid_t grayProcess = fork();
     write(fd_output, statistic_info, strlen(statistic_info));
  
     close(fd_output);
+  } else { int status;
+    waitpid(child_pid, &status, 0);
+
+    if(WIFEXITED(status)) {
+      printf("s-a incheiat procesul cu pid-ul %d si codul %d\n", child_pid, WEXITSTATUS(status));
+    } else {
+      printf("Procesul cu pid-ul %d s-a incheiat anormal\n", child_pid);
+    }
+  }
 }
  
 void convertToGray(const char *input_path, const char *output_path) {
     int input_fd = open(input_path, O_RDONLY);
-    int output_fd = open(output_path, O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
 
-    if (input_fd == -1 || output_fd == -1) {
+    if (input_fd == -1) {
         perror("EROARE la deschidere fisier");
         exit(-1);
     }
@@ -256,17 +269,41 @@ void convertToGray(const char *input_path, const char *output_path) {
     BMPHeader bmp_header;
     InfoHeader info_header;
 
-    if (read(input_fd, &bmp_header, sizeof(BMPHeader)) == -1 || read(input_fd, &info_header, sizeof(InfoHeader)) == -1) {
+    if (read(input_fd, &bmp_header, sizeof(BMPHeader) - 2) == -1 || read(input_fd, &info_header, sizeof(InfoHeader) - 4) == -1) {
         perror("EROARE citire header BMP");
         close(input_fd);
-        close(output_fd);
+	// close(output_fd);
         exit(-1);
     }
 
     Pixel pixel;
 
-    for (int y = 0; y < 1080; ++y) {
-        for (int x = 0; x < 1920; ++x) {
+    int output_fd = open(output_path, O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
+
+    if(output_fd == -1){
+      perror("EROARE la deschidere fisier output");
+      close(output_fd);
+      exit(-1);
+    }
+
+    if(write(output_fd, &bmp_header, sizeof(BMPHeader) - 2) == -1){
+  perror("EROARE scriere header BMP");
+  close(input_fd);
+  close(output_fd);
+  exit(-1);
+}
+
+if(write(output_fd, &info_header, sizeof(InfoHeader) - 4) == -1){
+  perror("EROARE scriere info header BMP");
+  close(input_fd);
+  close(output_fd);
+  exit(-1);
+ }
+    
+lseek(input_fd, bmp_header.offset, SEEK_SET);
+
+    for (int y = 0; y < info_header.height; ++y) {
+        for (int x = 0; x < info_header.width; ++x) {
             if (read(input_fd, &pixel, sizeof(Pixel)) == -1) {
                 perror("EROARE citire pixel");
                 close(input_fd);
@@ -295,7 +332,7 @@ void convertToGray(const char *input_path, const char *output_path) {
 }
 
 int main(int argc, char *argv[]) {
-    if (argc != 2) {
+    if (argc > 3) {
         perror("Usage ./program <fisier_intrare>");
         exit(-1);
     }
@@ -313,7 +350,7 @@ int main(int argc, char *argv[]) {
         exit(EXIT_FAILURE);
     }
  
-    processFile(argv[1], &file_info);
+    processFile(argv[1], &file_info, argv[2]);
 
     int status;
     pid_t childPid;
