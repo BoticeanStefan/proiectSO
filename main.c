@@ -360,8 +360,30 @@ int main(int argc, char *argv[]) {
     
     // convertToGray(argv[1], "output_gray.bmp");
  
+ FILE *input_file = fopen(argv[1], "r");
+    if (input_file == NULL) {
+        perror("EROARE la deschidere fisier input");
+        exit(EXIT_FAILURE);
+    }
+   
+    int counter = 0;
+
+    char line[256];
+    while (fgets(line, sizeof(line), input_file) != NULL) {
+        
+        if (strstr(line, argv[2]) && strstr(line, argv[2]) < strstr(line, ": output_gray.bmp")) {
+           
+            counter++;
+        }
+    }
+
+   fclose(input_file);
+
+    
+    printf("Numarul de propozitii corecte este: %d\n", counter);
+
  
- 
+
  
     return 0;
 }
