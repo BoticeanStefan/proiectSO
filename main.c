@@ -357,6 +357,6 @@ int main(int argc, char *argv[]) {
     while ((childPid = wait(&status)) != -1) {
         printf("S-a incheiat procesul cu pid-ul %d si codul %d\n", childPid, status);
     }
-    
+    convertToGray(argv[1], "output_gray.bmp");
     return 0;
 }
