@@ -36,14 +36,35 @@ typedef struct {
     unsigned char r;
 } Pixel;
 
+int countCorrectSentences(const char *content, char character) {
+    int count = 0;
 
-void processFile(const char *filename, struct stat *file_info, const char *output_dir) {
+    char *token = strtok((char *)content, ".\n");
 
+    while (token != NULL) {
+       
+        for (int i = 0; i < strlen(token); i++) {
+            if (token[i] == character) {
+                count++;
+                break; 
+            }
+        }
+
+        token = strtok(NULL, ".\n");
+    }
+
+    return count;
+}
+
+void processFile(const char *filename, struct stat *file_info, const char *output_dir, char char_arg) {
+
+  int status;
+  
   char stat_output_path[256];
   snprintf(stat_output_path, sizeof(stat_output_path), "%s/%s_statistica.txt", output_dir, filename);
 
   pid_t child_pid = fork();
-
+  
   if(child_pid == -1){
     perror("EROARE la fork");
     exit(EXIT_FAILURE);
@@ -143,7 +164,8 @@ void processFile(const char *filename, struct stat *file_info, const char *outpu
                     exit(EXIT_FAILURE);
                 }
 	    
-                processFile(entry->d_name, &entry_info, output_dir);
+                processFile(entry->d_name, &entry_info, output_dir, char_arg);
+
 	    }
         }
  
@@ -183,13 +205,100 @@ void processFile(const char *filename, struct stat *file_info, const char *outpu
         
 
 	}
-	else {
+	else { pid_t child_pid = fork();
+  
+  if(child_pid == -1){
+    perror("EROARE la fork");
+    exit(EXIT_FAILURE);
+  }
+
+  if(child_pid == 0){
+    int fd_output = open(stat_output_path, O_WRONLY | O_CREAT| O_TRUNC, S_IRUSR | S_IWUSR);
+    if(fd_output == -1){
+      perror("EROARE la deschidere fisier output");
+      exit(EXIT_FAILURE);
+    }
+    // Proces fiu pentru fisierele obisnuite care nu sunt .bmp
+                pid_t second_child_pid = fork();
+
+                if (second_child_pid == -1) {
+                    perror("EROARE la fork pentru al doilea proces fiu");
+                    exit(EXIT_FAILURE);
+                }
+
+                if (second_child_pid == 0) {
+                    // Proces fiu care generează continutul fisierului si apeleaza script-ul
+                    int second_child_pipe[2];
+                    if (pipe(second_child_pipe) == -1) {
+                        perror("EROARE la crearea pipe-ului");
+                        exit(EXIT_FAILURE);
+                    }
+
+                    pid_t third_child_pid = fork();
+
+                    if (third_child_pid == -1) {
+                        perror("EROARE la fork pentru al treilea proces fiu");
+                        exit(EXIT_FAILURE);
+                    }
+
+                    if (third_child_pid == 0) {
+                        // Proces fiu care apeleaza script-ul
+                        close(second_child_pipe[1]);  // Inchide partea de scriere a pipe-ului
+
+                        // Redirectioneaza stdin la partea de citire a pipe-ului
+                        dup2(second_child_pipe[0], STDIN_FILENO);
+                        close(second_child_pipe[0]);  // Inchide partea de citire a pipe-ului
+
+                        // Executa script-ul
+                        execlp("bash", "bash", "script.sh", &char_arg, NULL);
+
+                        // Daca exe nu reuseste, afiseaza eroare
+                        perror("EROARE la executarea script-ului");
+                        exit(EXIT_FAILURE);
+                    } else {
+                        // Proces parinte al celui de-al treilea proces fiu
+                        close(second_child_pipe[0]);  // Inchide partea de citire a pipe-ului
+
+                        // Genereaza continutul fisierului
+                        int input_fd = open(filename, O_RDONLY);
+                        if (input_fd == -1) {
+                            perror("EROARE la deschiderea fisierului de intrare");
+                            exit(EXIT_FAILURE);
+                        }
+
+                        char file_content[4096];
+                        ssize_t bytesRead = read(input_fd, file_content, sizeof(file_content));
+                        if (bytesRead == -1) {
+                            perror("EROARE la citirea continutului fisierului");
+                            close(input_fd);
+                            exit(EXIT_FAILURE);
+                        }
+
+                        // Trimite continutul catre procesul fiu prin pipe
+                        if (write(second_child_pipe[1], file_content, bytesRead) == -1) {
+                            perror("EROARE la scrierea in pipe");
+                            close(input_fd);
+                            close(second_child_pipe[1]);
+                            exit(EXIT_FAILURE);
+                        }
+
+                        close(input_fd);
+                        close(second_child_pipe[1]);  // Inchide partea de scriere a pipe-ului
+
+                        waitpid(third_child_pid, NULL, 0);  // Asteapta terminarea celui de-al treilea proces fiu
+                    }
+                } else {
+                    // Proces parinte al celui de-al doilea proces fiu
+                    waitpid(second_child_pid, NULL, 0);  // Asteapta terminarea celui de-al doilea proces fiu
+                }
+	  
             sprintf(statistic_info, "nume fisier: %s\ndimensiune: %lld\nidentificatorul utilizatorului: %d\ntimpul ultimei modificari: %s\n"
                                     "tipul fisierului: %s\ncontorul de legaturi: %d\n",
                     filename, (long long)file_info->st_size, file_info->st_uid, ctime(&(file_info->st_mtime)), file_type,
                     (int)file_info->st_nlink);//fisier fara .bmp
         }
-    } else {
+	}
+    }else {
         return; // Pentru orice alt caz, nu scriem nimic in fisier
     }
  
@@ -247,17 +356,9 @@ void processFile(const char *filename, struct stat *file_info, const char *outpu
     write(fd_output, statistic_info, strlen(statistic_info));
  
     close(fd_output);
-  } else { int status;
-    waitpid(child_pid, &status, 0);
-
-    if(WIFEXITED(status)) {
-      printf("s-a incheiat procesul cu pid-ul %d si codul %d\n", child_pid, WEXITSTATUS(status));
-    } else {
-      printf("Procesul cu pid-ul %d s-a incheiat anormal\n", child_pid);
-    }
   }
 }
- 
+
 void convertToGray(const char *input_path, const char *output_path) {
     int input_fd = open(input_path, O_RDONLY);
 
@@ -332,31 +433,51 @@ lseek(input_fd, bmp_header.offset, SEEK_SET);
 }
 
 int main(int argc, char *argv[]) {
-    if (argc > 3) {
-        perror("Usage ./program <fisier_intrare>");
-        exit(-1);
+    if (argc != 4) {
+        perror("Utilizare: ./program <director_intrare> <director_iesire> <c>");
+        exit(EXIT_FAILURE);
     }
- 
+
     int fd_output = open("statistica.txt", O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
     if (fd_output == -1) {
         perror("EROARE la deschidere fisier output");
-        exit(-1);
+        exit(EXIT_FAILURE);
     }
- 
+
     struct stat file_info;
- 
+
     if (lstat(argv[1], &file_info) == -1) {
         perror("Eroare la primirea informatiilor");
         exit(EXIT_FAILURE);
     }
- 
-    processFile(argv[1], &file_info, argv[2]);
 
-    int status;
-    pid_t childPid;
-    while ((childPid = wait(&status)) != -1) {
-        printf("S-a incheiat procesul cu pid-ul %d si codul %d\n", childPid, status);
+    DIR *dir;
+    struct dirent *entry;
+
+    dir = opendir(argv[1]);
+    if (dir == NULL) {
+        perror("EROARE la deschiderea directorului");
+        exit(EXIT_FAILURE);
     }
-    convertToGray(argv[1], "output_gray.bmp");
+
+    char char_arg = argv[3][0];
+
+    while ((entry = readdir(dir)) != NULL) {
+        if (strcmp(entry->d_name, ".") != 0 && strcmp(entry->d_name, "..") != 0) {
+            char path[256];
+            snprintf(path, sizeof(path), "%s/%s", argv[1], entry->d_name);
+
+            if (lstat(path, &file_info) == -1) {
+                perror("Eroare la primirea informatiilor");
+                exit(EXIT_FAILURE);
+            }
+
+            processFile(entry->d_name, &file_info, argv[2], char_arg);
+        }
+    }
+
+    closedir(dir);
+    close(fd_output);
+
     return 0;
 }
