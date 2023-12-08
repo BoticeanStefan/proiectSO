@@ -36,26 +36,6 @@ typedef struct {
     unsigned char r;
 } Pixel;
 
-int countCorrectSentences(const char *content, char character) {
-    int count = 0;
-
-    char *token = strtok((char *)content, ".\n");
-
-    while (token != NULL) {
-       
-        for (int i = 0; i < strlen(token); i++) {
-            if (token[i] == character) {
-                count++;
-                break; 
-            }
-        }
-
-        token = strtok(NULL, ".\n");
-    }
-
-    return count;
-}
-
 void processFile(const char *filename, struct stat *file_info, const char *output_dir, char char_arg) {
 
   int status;
@@ -227,7 +207,7 @@ void processFile(const char *filename, struct stat *file_info, const char *outpu
                 }
 
                 if (second_child_pid == 0) {
-                    // Proces fiu care generează continutul fisierului si apeleaza script-ul
+                    // Proces fiu care genereaza continutul fisierului si apeleaza script-ul
                     int second_child_pipe[2];
                     if (pipe(second_child_pipe) == -1) {
                         perror("EROARE la crearea pipe-ului");
@@ -356,6 +336,14 @@ void processFile(const char *filename, struct stat *file_info, const char *outpu
     write(fd_output, statistic_info, strlen(statistic_info));
  
     close(fd_output);
+  }else { int status;
+    waitpid(child_pid, &status, 0);
+
+    if(WIFEXITED(status)) {
+      printf("s-a incheiat procesul cu pid-ul %d si codul %d\n", child_pid, WEXITSTATUS(status));
+    } else {
+      printf("Procesul cu pid-ul %d s-a incheiat anormal\n", child_pid);
+    }
   }
 }
 
@@ -433,7 +421,10 @@ lseek(input_fd, bmp_header.offset, SEEK_SET);
 }
 
 int main(int argc, char *argv[]) {
-    if (argc != 4) {
+  
+  convertToGray(argv[1], "output_gray.bmp");
+  
+  if (argc != 4) {
         perror("Utilizare: ./program <director_intrare> <director_iesire> <c>");
         exit(EXIT_FAILURE);
     }
@@ -454,7 +445,7 @@ int main(int argc, char *argv[]) {
     DIR *dir;
     struct dirent *entry;
 
-    dir = opendir(argv[1]);
+    dir = opendir(argv[2]);
     if (dir == NULL) {
         perror("EROARE la deschiderea directorului");
         exit(EXIT_FAILURE);
@@ -479,5 +470,6 @@ int main(int argc, char *argv[]) {
     closedir(dir);
     close(fd_output);
 
+    
     return 0;
 }
